@@ -14,7 +14,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
     "@react-native/gradle-plugin": "^0.82.1",
-    "expo": "~53.0.20",
+    "expo": "~54.0.25",
     "expo-modules-autolinking": "^3.0.22",
     "expo-router": "^6.0.15",
     "expo-splash-screen": "~0.18.2",
