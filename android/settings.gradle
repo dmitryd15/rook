@@ -1,0 +1,140 @@
+// `pluginManagement` must appear before any other statements per Gradle.
+pluginManagement {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+// Resolve plugin includeBuilds early so pluginManagement/plugins can see them.
+def reactNativeGradlePlugin = null
+def expoPluginsPath = null
+
+println "[settings.gradle] resolving node-based plugin paths..."
+try {
+  // Try common package names in order
+  def candidates = [
+    'react-native-gradle-plugin/package.json',
+    '@react-native/gradle-plugin/package.json'
+  ]
+  def resolved = null
+  for (c in candidates) {
+    try {
+      def out = providers.exec {
+        workingDir(rootDir)
+        commandLine('node', '--print', "require.resolve('${c}', { paths: [require.resolve('react-native/package.json')] })")
+      }.standardOutput.asText.get().trim()
+      if (out) { resolved = out; break }
+    } catch (Exception ee) {
+      // ignore and try next
+    }
+  }
+  if (resolved) {
+    def f = new File(resolved).getParentFile()
+    reactNativeGradlePlugin = f.absolutePath
+    println "[settings.gradle] resolved react-native gradle plugin at: ${reactNativeGradlePlugin}"
+  }
+} catch (Exception e) {
+  println "[settings.gradle] node resolution error: ${e.message}"
+}
+
+if (!reactNativeGradlePlugin) {
+  def fallback = new File(rootDir, '../node_modules/react-native-gradle-plugin')
+  if (fallback.exists()) {
+    reactNativeGradlePlugin = fallback.getAbsolutePath()
+    println "[settings.gradle] using fallback react-native gradle plugin path: ${reactNativeGradlePlugin}"
+  }
+}
+
+try {
+  def out = providers.exec {
+    workingDir(rootDir)
+    commandLine('node', '--print', "require.resolve('expo-modules-autolinking/package.json', { paths: [require.resolve('expo/package.json')] })")
+  }.standardOutput.asText.get().trim()
+  if (out) {
+    def expoPkg = new File(out).getParentFile()
+    // expo autolinking plugin lives in android/expo-gradle-plugin relative to package
+    def candidate = new File(expoPkg, 'android/expo-gradle-plugin')
+    if (candidate.exists()) {
+      expoPluginsPath = candidate.absolutePath
+      println "[settings.gradle] resolved expo autolinking plugin at: ${expoPluginsPath}"
+    }
+  }
+} catch (Exception e) {
+  println "[settings.gradle] expo autolinking node resolution error: ${e.message}"
+}
+
+if (!expoPluginsPath) {
+  def fallback2 = new File(rootDir, '../node_modules/expo-modules-autolinking')
+  if (fallback2.exists()) {
+    def candidate = new File(fallback2, '../android/expo-gradle-plugin')
+    if (candidate.exists()) {
+      expoPluginsPath = candidate.absolutePath
+      println "[settings.gradle] using fallback expo autolinking plugin path: ${expoPluginsPath}"
+    }
+  }
+}
+
+// Include builds early so pluginManagement/plugins can use them
+if (reactNativeGradlePlugin) {
+  try {
+    includeBuild(reactNativeGradlePlugin)
+    println "[settings.gradle] includeBuild added for react-native gradle plugin"
+  } catch (Exception e) {
+    println "[settings.gradle] includeBuild react-native failed: ${e.message}"
+  }
+}
+if (expoPluginsPath) {
+  try {
+    includeBuild(expoPluginsPath)
+    println "[settings.gradle] includeBuild added for expo autolinking plugin"
+  } catch (Exception e) {
+    println "[settings.gradle] includeBuild expo autolinking failed: ${e.message}"
+  }
+}
+
+// pluginManagement was already declared above; continue with plugin setup
+
+def pluginsAvailable = true
+try {
+  plugins {
+    id("com.facebook.react.settings")
+    id("expo-autolinking-settings")
+  }
+
+  extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    if (System.getenv('EXPO_USE_COMMUNITY_AUTOLINKING') == '1') {
+      ex.autolinkLibrariesFromCommand()
+    } else {
+      ex.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
+    }
+  }
+
+  expoAutolinking.useExpoModules()
+} catch (Exception e) {
+  pluginsAvailable = false
+  println "Warning: React Native/expo autolinking plugins unavailable: ${e.message}"
+}
+
+rootProject.name = 'Auxilliator'
+
+if (pluginsAvailable) {
+  try {
+    expoAutolinking.useExpoVersionCatalog()
+    include ':app'
+    // If expoAutolinking.reactNativeGradlePlugin is available, include it.
+    try {
+      if (expoAutolinking.reactNativeGradlePlugin) {
+        includeBuild(expoAutolinking.reactNativeGradlePlugin)
+        println "[settings.gradle] includeBuild added for expoAutolinking.reactNativeGradlePlugin"
+      }
+    } catch (ee) {
+      println "[settings.gradle] unable to include expoAutolinking.reactNativeGradlePlugin: ${ee.message}"
+    }
+  } catch (Exception e) {
+    println "Warning: expo autolinking functions not available: ${e.message}"
+    include ':app'
+  }
+} else {
+  include ':app'
+}
